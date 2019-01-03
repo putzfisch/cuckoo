@@ -10,13 +10,17 @@ import logging
 import multiprocessing
 import os
 import socket
+import sys
 import tarfile
 import zipfile
 
 from flask import Flask, request, jsonify, make_response, abort, json
+from bson import ObjectId
 
+from cuckoo.common.colors import red
 from cuckoo.common.config import config, parse_options
 from cuckoo.common.files import Files, Folders
+from cuckoo.common.mongo import mongo
 from cuckoo.common.utils import parse_bool, constant_time_compare
 from cuckoo.core.database import Database, Task
 from cuckoo.core.database import TASK_REPORTED, TASK_COMPLETED, TASK_RUNNING
@@ -27,6 +31,14 @@ from cuckoo.misc import cwd, version, decide_cwd, Pidfile
 log = logging.getLogger(__name__)
 db = Database()
 sm = SubmitManager()
+
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        return json.JSONEncoder.default(self, o)
+
 
 # Initialize Flask app.
 app = Flask(__name__)
@@ -401,6 +413,33 @@ def tasks_report(task_id, report_format="json"):
                               " try again with JSON format")
         return open(report_path, "rb").read()
 
+@app.route("/tasks/report/mongo/<int:task_id>/<elements>")
+def tasks_report_from_mongo(task_id, elements):
+    if elements not in (
+            'info',
+            'procmemory',
+            'target',
+            'extracted',
+            'signatures',
+            'dropped',
+            'shots',
+            'behavior',
+            'debug',
+            'screenshots',
+            'strings',
+            'network',
+            'metadata'):
+        return json_error(404, "'{0}' not found for {1}".format(elements, task_id))
+
+    report_content = mongo.db.analysis.find_one({"info.id": task_id}, {elements: 1, "_id": 0})
+
+    if report_content is None:
+        return json_error(404, "'{0}' not found".format(task_id))
+
+    response = make_response(json.dumps(report_content, cls=JSONEncoder))
+    response.headers["Content-Type"] = "application/json"
+    return response
+
 @app.route("/tasks/screenshots/<int:task_id>")
 @app.route("/v1/tasks/screenshots/<int:task_id>")
 @app.route("/tasks/screenshots/<int:task_id>/<screenshot>")
@@ -690,3 +729,13 @@ def cuckoo_api(hostname, port, debug):
 if os.environ.get("CUCKOO_APP") == "api":
     decide_cwd(exists=True)
     Database().connect()
+
+    # Connect to MongoDB
+    if not mongo.init():
+        sys.exit(red(
+            "In order to use the Cuckoo Web Interface it is required to have "
+            "MongoDB up-and-running and enabled in Cuckoo. Please refer to our "
+            "official documentation as well as the $CWD/conf/reporting.conf file."
+        ))
+
+    mongo.connect()
