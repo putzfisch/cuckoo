@@ -647,6 +647,14 @@ class Config(object):
                 "scan": Boolean(False),
                 "key": String("a0283a2c3d55728300d064874239b5346fb991317e8449fe43c902879d758088", sanitize=True),
             },
+            "whitelist": {
+                "enabled": Boolean(False),
+                "url": String(),
+                "token": String(),
+                "ip_endpoint": String(),
+                "domain_endpoint": String(),
+                "url_endpoint": String()
+            },
             "irma": {
                 "enabled": Boolean(False),
                 "timeout": Int(60),

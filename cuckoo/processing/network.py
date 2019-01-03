@@ -26,7 +26,7 @@ from cuckoo.common.exceptions import CuckooProcessingError
 from cuckoo.common.irc import ircMessage
 from cuckoo.common.objects import File
 from cuckoo.common.utils import convert_to_printable
-from cuckoo.common.whitelist import is_whitelisted_domain
+from cuckoo.common.whitelist import is_whitelisted_domain, is_whitelisted_ip, is_whitelisted_url
 from cuckoo.misc import mkdir
 
 # Be less verbose about httpreplay logging messages.
@@ -204,6 +204,9 @@ class Pcap(object):
 
             if connection["dst"] not in self.hosts:
                 ip = convert_to_printable(connection["dst"])
+
+                if is_whitelisted_ip(ip):
+                    return
 
                 if ip not in self.hosts:
                     self.hosts.append(ip)
@@ -439,6 +442,9 @@ class Pcap(object):
             if entry["domain"] == domain:
                 return
 
+        if is_whitelisted_domain(domain):
+            return
+
         self.unique_domains.append({"domain": domain,
                                     "ip": self._dns_gethostbyname(domain)})
 
@@ -495,6 +501,9 @@ class Pcap(object):
             entry["uri"] = convert_to_printable(url)
             entry["body"] = convert_to_printable(http.body)
             entry["path"] = convert_to_printable(http.uri)
+
+            if is_whitelisted_url(entry["uri"]):
+                return False
 
             if "user-agent" in http.headers:
                 entry["user-agent"] = \
@@ -637,6 +646,9 @@ class Pcap(object):
 
                 self._add_hosts(connection)
 
+                if is_whitelisted_ip(connection["dst"]) or is_whitelisted_ip(connection["src"]):
+                    continue
+
                 if ip.p == dpkt.ip.IP_PROTO_TCP:
                     tcp = ip.data
                     if not isinstance(tcp, dpkt.tcp.TCP):
@@ -676,6 +688,11 @@ class Pcap(object):
                         self._udp_dissect(connection, udp.data)
 
                         src, sport, dst, dport = (connection["src"], connection["sport"], connection["dst"], connection["dport"])
+
+                        # Ignore DNS traffic to whitelisted DNS servers
+                        if (dport == 53 and dst in self.known_dns) or (sport == 53 and src in self.known_dns):
+                            continue
+
                         if not ((dst, dport, src, sport) in self.udp_connections_seen or (src, sport, dst, dport) in self.udp_connections_seen):
                             self.udp_connections.append((src, sport, dst, dport, offset, ts-first_ts))
                             self.udp_connections_seen.add((src, sport, dst, dport))
